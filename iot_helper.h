@@ -1,0 +1,1 @@
+uint32_t iot_timestamp();
