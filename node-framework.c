@@ -42,7 +42,7 @@ static int (**cb_ptr_arr)(void*) = NULL;
 
 static char base_name_with_mac[MAX_NODE_NAME_LEN];
 static char node_name[MAX_NODE_NAME_LEN];
-static char * mqtt_name;
+static char * mqtt_name;    // pointer to default MQTT node name (either base_name_with_mac or node_name)
 
 void mqtt_publish_error(const char * text) {
     char topic[64];
@@ -119,9 +119,7 @@ void iot_set_callback(iot_cb_code_t callback_code, int (*func_ptr)(void*) ) {
 
 
 void iot_update_firmware( const char * url ) {
-    char temp[128];
 
-    // TODO
     esp_http_client_config_t config = {
 
         //TODO
@@ -131,20 +129,12 @@ void iot_update_firmware( const char * url ) {
     };
 
     if (strlen(url)==0) {
-        size_t string_size=128;
-        if (nvs_get_str(storage_handle, "update_url", temp, &string_size)==ESP_OK) {
-            temp[string_size]=0;
-            config.url = temp;
-            ESP_LOGI(TAG, "OTA update from saved URL: '%s'", temp);
-        } else {
-            ESP_LOGE(TAG, "update url not given nor set!");
-            mqtt_publish_error("update url not given nor set!");
-            return;
-        }
-    } else {
-        config.url = url;
-        ESP_LOGI(TAG, "OTA update via MQTT URL: '%s'", url);
+        ESP_LOGE(TAG, "update url not given!");
+        mqtt_publish_error("update url not given!");
+        return;
     }
+    config.url = url;
+    ESP_LOGI(TAG, "OTA update via URL: '%s'", url);
 
     config.skip_cert_common_name_check = true;
 
@@ -188,8 +178,8 @@ void mqtt_update_node_name(const char * name) {
     mqtt_manager_subscribe(topic);
     ESP_LOGI(TAG,"-- Subscribe %s", topic);
 
-    char oldname[MAX_NODE_NAME_LEN];
-    strncpy(oldname, node_name,MAX_NODE_NAME_LEN);
+    //char oldname[MAX_NODE_NAME_LEN];
+    //strncpy(oldname, node_name,MAX_NODE_NAME_LEN);
     strncpy(node_name, name, MAX_NODE_NAME_LEN);
 
     /* callback */
@@ -447,22 +437,6 @@ bool iot_get_nvs_bool(const char * variable, bool * value) {
 
 
 void wifi_connected_cb( void * param ) {
-
-    // defer getting MAC address to  WM_EVENT_STA_GOT_IP because earlier events might have been missed    
-	if (strcmp(base_name_with_mac,"")==0) {
-		// get MAC address if not yet fetched
-		struct wifi_settings_t * settings = wifi_manager_get_wifi_settings();
-		//strncpy(base_name_with_mac, (char*)wifi_settings.ap_ssid, MAX_NODE_NAME_LEN );
-		strncpy(base_name_with_mac, (char*)settings->ap_ssid, MAX_NODE_NAME_LEN );
-		size_t string_size = MAX_NODE_NAME_LEN;
-		if (nvs_get_str(storage_handle, "name", node_name, &string_size)==ESP_OK) {
-			ESP_LOGI(TAG, "Publishing as %s (responding also to %s)", node_name, base_name_with_mac);
-			mqtt_name = node_name;
-		} else {
-			ESP_LOGI(TAG, "Publishing as %s",base_name_with_mac);
-			mqtt_name = base_name_with_mac;
-		}
-	}
     if(cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ]) (*cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ])( (void*) IOT_WIFI_CONNECTED );
 }
 
@@ -543,15 +517,43 @@ void iot_init(const char * base_name) {
     iot_led_init();
 
     base_name_with_mac[0] = 0;
+    node_name[0] = 0;
 
-    wifi_manager_start(base_name, true);
+    // try to read user defined node name
+    size_t string_size = MAX_NODE_NAME_LEN;
+    nvs_get_str(storage_handle, "name", node_name, &string_size);
+
+    if (strcmp(node_name,"")==0) {
+        // user defined name is not set. User the default "base_name" as Access Point name in WiFi Manager and append it with MAC address
+        wifi_manager_start(base_name, true);
+    } else {
+        // user defined name is found. Use it as Access Point name in WiFi Manager (do not append it with MAC address)
+        wifi_manager_start(node_name, false);
+    }
+
     wifi_manager_set_callback(WM_EVENT_STA_GOT_IP, wifi_connected_cb);
     wifi_manager_set_callback(WM_ORDER_CONNECT_STA, wifi_connecting_cb);
     wifi_manager_set_callback(WM_EVENT_STA_DISCONNECTED, wifi_disconnected_cb);
+
+    // Wait until wifi manager has been started
+    while (!wifi_manager_is_started()) {
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+
+    // Append default node name with last 6 bytes from MAC address
+    struct wifi_settings_t * settings = wifi_manager_get_wifi_settings();
+    strncpy(base_name_with_mac, (char*)settings->ap_ssid, MAX_NODE_NAME_LEN );
+    if (strcmp(node_name,"") != 0) {
+        ESP_LOGI(TAG, "Publishing as %s (responding also to %s)", node_name, base_name_with_mac);
+        mqtt_name = node_name;
+    } else {
+        ESP_LOGI(TAG, "Publishing as %s",base_name_with_mac);
+        mqtt_name = base_name_with_mac;
+    }
+
     mqtt_manager_start();
     mqtt_manager_set_callback( MM_EVENT_MQTT_EVENT, mqtt_event_handler_cb);
     mqtt_manager_set_callback( MM_ORDER_CONNECT, mqtt_connecting_cb);
-
 }
 
 
