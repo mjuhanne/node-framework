@@ -93,14 +93,17 @@ void mqtt_publish_ha_cfg( const char * device_type, const char * subtopic, const
 	size_t len = strlen(cfg_template) + name_count*strlen(mqtt_get_name()) + 1;
 	char * tmp = malloc(len);
 	if (tmp) {
-	    if (name_count==1)
+	    if (name_count == 1) {
 	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
-	    else if (name_count==2)
+        } else if (name_count == 2) {
 	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
-	    else if (name_count==3)
+        } else if (name_count == 3) {
 	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
-	    else if (name_count==4)
+        } else if (name_count == 4) {
 	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
+        } else if (name_count == 5) {
+            snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
+        }
 	    mqtt_publish_ext(device_type, subtopic, tmp, true);
 	    free(tmp);
 	}
@@ -170,11 +173,11 @@ void mqtt_update_node_name(const char * name) {
     ESP_LOGI(TAG,"Updating node name to '%s'",name);
     char topic[64];
     if (strcmp(mqtt_name, base_name_with_mac) != 0) {
-        snprintf(topic,64,"/home/+/%s/#",mqtt_name);
+        snprintf(topic,64,"/home/control/%s/#",mqtt_name);
         mqtt_manager_unsubscribe(topic);
         ESP_LOGI(TAG,"-- Unsubscribe %s", topic);
     }
-    snprintf(topic,64,"/home/+/%s/#",name);
+    snprintf(topic,64,"/home/control/%s/#",name);
     mqtt_manager_subscribe(topic);
     ESP_LOGI(TAG,"-- Subscribe %s", topic);
 
@@ -249,18 +252,13 @@ void mqtt_get(const char * variable) {
 }
 
 void mqtt_handle_msg(const char * device_type, const char * subtopic, const char * arg, const char * data) {
-    if (arg && (strcmp(arg,"config")==0))
-        // ignore 'config' JSONs sent by us
-        return;
-    if (strcmp(subtopic,"config")==0)
-        // ignore 'config' JSONs sent by us
-        return;
+    bool handled = true;
     if (arg)
         printf("HANDLE MSG: %s:%s (%s) : %s\n",device_type, subtopic,arg,data);
     else
         printf("HANDLE MSG: %s:%s : %s\n",device_type, subtopic,data);
 
-    if (strcmp(device_type,"node")==0) {
+    if (strcmp(device_type,"control")==0) {
         if (strcmp(subtopic,"get")==0) {
             if (arg) {
                 mqtt_get(arg);
@@ -283,9 +281,12 @@ void mqtt_handle_msg(const char * device_type, const char * subtopic, const char
         } else if (strcmp(subtopic,"restart")==0) {
             esp_restart();
         } else {
-            // ignore others, maybe msgs sent by us
+            handled = false;
         }
-    } else {
+    }
+
+    if (!handled) {
+        // let node implementation handle the other commands
         iot_mqtt_msg_t msg;
         msg.device_type = device_type;
         msg.subtopic = subtopic;
@@ -326,7 +327,8 @@ void mqtt_handle_data(esp_mqtt_event_handle_t event)
         return;
 
     token = strtok_r(NULL, "/",&rest);
-    // the device type is 'node', 'switch' etc..
+    // the device type is 'control', node', 'switch' etc..
+    // In the current implementation, we have subscribed only to 'control' messages, so other device type message should not be received
     strncpy(device_type, token,32);
 
     // ignore node name, because we have already subscribed only for those that match our node name
@@ -354,13 +356,13 @@ void mqtt_event_handler_cb(void * arg)
 			ESP_LOGW(TAG," Heap: %d", esp_get_free_heap_size());
 			xEventGroupSetBits(conn_event_group, MQTT_CONNECTED_BIT);
 
-			mqtt_manager_subscribe("/home/node/all/#");
+			mqtt_manager_subscribe("/home/control/all/#");
 
 			char temp[64];
-			snprintf(temp,64,"/home/+/%s/#",base_name_with_mac);
+			snprintf(temp,64,"/home/control/%s/#",base_name_with_mac);
 			mqtt_manager_subscribe(temp);
 			if (mqtt_name != base_name_with_mac) {
-				snprintf(temp,64,"/home/+/%s/#",mqtt_name);
+				snprintf(temp,64,"/home/control/%s/#",mqtt_name);
 				mqtt_manager_subscribe(temp);
 			}
 
