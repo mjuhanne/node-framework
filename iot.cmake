@@ -2,19 +2,27 @@
 # For example:
 # export IOT_FIRMWARE_SERVER_WWW_ROOT_URI=web-user@firmware-server.local:/var/www
 # export IOT_FIRMWARE_SERVER_URI=http://firmware-server.local:80
+#
+# These OTA commands use the preconfigured command line HiveMQ MQTT client (https://www.hivemq.com/blog/mqtt-cli/) but feel free to modify the
+# commands to suit your favourite MQTT tool (mosquitto_pub for example)
 
-# --- OTA update can be done with project name (if there's only node running with the code and it's subscribe to /home/node/PROJECT_NAME/+) :
-# make mqtt-ota 
-# .. or alternatively with a specific node name (it is subscribed to subscribed to /home/node/NODE_NAME/+) :
-# make mqtt-node-ota NODE_NAME="examplenode-e975c1"
+# --- OTA update can be done with project name (this updates all nodes with the same project name that are subscribed to /home/control/PROJECT_NAME/#) :
+# idf.py mqtt-ota 
+# .. or alternatively with a specific node name (it is subscribed to subscribed to /home/control/NODE_NAME/#) :
+# NODE_NAME="examplenode-e975c1" idf.py mqtt-node-ota 
 
 add_custom_target(upload DEPENDS app
-	COMMAND sftp ${IOT_FIRMWARE_SERVER_WWW_ROOT_URI} <<< $$'put ${PROJECT_NAME}.bin')
+	COMMAND sftp $ENV{IOT_FIRMWARE_SERVER_WWW_ROOT_URI} <<< $$'put ${PROJECT_NAME}.bin'
+	)
 
 add_custom_target(mqtt-ota DEPENDS upload
-	COMMAND mqtt pub -t /home/node/${PROJECT_NAME}/update_firmware -m ${IOT_FIRMWARE_SERVER_URI}/${PROJECT_NAME}.bin
+	COMMAND mqtt pub -t /home/control/${PROJECT_NAME}/update_firmware -m $ENV{IOT_FIRMWARE_SERVER_URI}/${PROJECT_NAME}.bin
 	)
 
 add_custom_target(mqtt-node-ota DEPENDS upload
-	COMMAND mqtt pub -t /home/node/${NODE_NAME}/update_firmware -m ${IOT_FIRMWARE_SERVER_URI}/${PROJECT_NAME}.bin
+	COMMAND mqtt pub -t /home/control/$ENV{NODE_NAME}/update_firmware -m $ENV{IOT_FIRMWARE_SERVER_URI}/${PROJECT_NAME}.bin
+	)
+
+add_custom_target(mqtt-restart
+	COMMAND mqtt pub -t /home/control/$ENV{NODE_NAME}/restart -m 0
 	)

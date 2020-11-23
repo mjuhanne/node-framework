@@ -40,7 +40,8 @@ static int (**cb_ptr_arr)(void*) = NULL;
 
 #define MAX_NODE_NAME_LEN 32
 
-static char base_name_with_mac[MAX_NODE_NAME_LEN];
+static char base_name[MAX_NODE_NAME_LEN];
+static char base_name_with_mac[MAX_NODE_NAME_LEN+7];
 static char node_name[MAX_NODE_NAME_LEN];
 static char * mqtt_name;    // pointer to default MQTT node name (either base_name_with_mac or node_name)
 
@@ -87,6 +88,12 @@ void mqtt_publish_on_off( const char * device_type, const char * subtopic, int d
     } else {
         mqtt_publish(device_type, subtopic, "OFF");        
     }
+}
+
+void mqtt_publish_float( const char * device_type, const char * subtopic, float data) {
+    char data_str[16];
+    snprintf(data_str, 16, "%.2f", data);
+    mqtt_publish(device_type, subtopic, data_str);
 }
 
 void mqtt_publish_ha_cfg( const char * device_type, const char * subtopic, const char * cfg_template, int name_count) {
@@ -171,7 +178,7 @@ void iot_update_firmware( const char * url ) {
 
 void mqtt_update_node_name(const char * name) {
     ESP_LOGI(TAG,"Updating node name to '%s'",name);
-    char topic[64];
+    char * topic = malloc(64);
     if (strcmp(mqtt_name, base_name_with_mac) != 0) {
         snprintf(topic,64,"/home/control/%s/#",mqtt_name);
         mqtt_manager_unsubscribe(topic);
@@ -180,6 +187,7 @@ void mqtt_update_node_name(const char * name) {
     snprintf(topic,64,"/home/control/%s/#",name);
     mqtt_manager_subscribe(topic);
     ESP_LOGI(TAG,"-- Subscribe %s", topic);
+    free(topic);
 
     //char oldname[MAX_NODE_NAME_LEN];
     //strncpy(oldname, node_name,MAX_NODE_NAME_LEN);
@@ -193,6 +201,8 @@ void mqtt_update_node_name(const char * name) {
 
 
 void mqtt_set(const char * variable, const char * data) {
+    iot_set_variable_return_code_t ret = IOT_VARIABLE_NOT_FOUND;
+
     ESP_LOGI(TAG, "SET: %s -> %s",variable,data);
     if (strcmp(variable,"name")==0) {
         if (strlen(data)==0) {
@@ -212,29 +222,26 @@ void mqtt_set(const char * variable, const char * data) {
         }
         mqtt_update_node_name(data);
     } else {
-
-        /* callback: check if node recognizes this variable */
-        bool handled=false;
+        /* callback: let the node handle setting this variable. Return value IOT_SAVE_VARIABLE means that we want to save the variable to NVS. */
         if(cb_ptr_arr[ IOT_HANDLE_SET_VARIABLE ]) {
             iot_variable_t var;
             var.name = variable;
             var.data = data;
-            if ((*cb_ptr_arr[ IOT_HANDLE_SET_VARIABLE ])( &var )) {
-                handled=true;
-            }
-        }
-        if (!handled) {
-            ESP_LOGE(TAG,"SET: Unknown variable!");
-            mqtt_publish_error("Unknown variable");
-            return;
+            ret = (*cb_ptr_arr[ IOT_HANDLE_SET_VARIABLE ])( &var );
         }
     }
-    if (nvs_set_str(storage_handle, variable, data)!=ESP_OK) {
-        ESP_LOGE(TAG,"SET: error recording variable to NVS!");
-        mqtt_publish_error("error recording variable to NVS!");
-    } else
-    {
-        nvs_commit(storage_handle);
+
+    if (ret == IOT_VARIABLE_NOT_FOUND) {
+        ESP_LOGE(TAG,"SET: Unknown variable!");
+        mqtt_publish_error("Unknown variable");
+    } else if (ret == IOT_SAVE_VARIABLE) {
+        if (nvs_set_str(storage_handle, variable, data) != ESP_OK) {
+            ESP_LOGE(TAG,"SET: error recording variable to NVS!");
+            mqtt_publish_error("error recording variable to NVS!");
+        } else {
+            ESP_LOGI(TAG,"Value written to NVS");
+            nvs_commit(storage_handle);
+        }
     }
 }
 
@@ -279,6 +286,8 @@ void mqtt_handle_msg(const char * device_type, const char * subtopic, const char
             ESP_LOGI(TAG,"Stopping AP..");
             wifi_manager_send_message(WM_ORDER_STOP_AP, NULL);
         } else if (strcmp(subtopic,"restart")==0) {
+            mqtt_publish("node","status","Restarting...");
+            vTaskDelay(1000 / portTICK_RATE_MS);
             esp_restart();
         } else {
             handled = false;
@@ -304,6 +313,7 @@ void mqtt_handle_msg(const char * device_type, const char * subtopic, const char
     Examples:  
     /home/switch/my_switch_123/set/my_custom_parameter  (data: "foobar")
     /home/light/kitchen_light/switch  (data: "ON")
+    /home/control/waterleaksensor-esp32/firmware_upgrade   (updates *ALL* the project nodes!)
 */
 void mqtt_handle_data(esp_mqtt_event_handle_t event)
 {
@@ -327,8 +337,9 @@ void mqtt_handle_data(esp_mqtt_event_handle_t event)
         return;
 
     token = strtok_r(NULL, "/",&rest);
-    // the device type is 'control', node', 'switch' etc..
-    // In the current implementation, we have subscribed only to 'control' messages, so other device type message should not be received
+    // the device type is either 'control' (directed to node) or 'node', 'switch' etc.. (messages broadcasted by the node).
+    // In the current implementation, we have subscribed to receive only 'control'  so other device type 
+    // message should not be received
     strncpy(device_type, token,32);
 
     // ignore node name, because we have already subscribed only for those that match our node name
@@ -353,18 +364,27 @@ void mqtt_event_handler_cb(void * arg)
     switch (event->event_id) {
 		case MQTT_EVENT_CONNECTED:
 			ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-			ESP_LOGW(TAG," Heap: %d", esp_get_free_heap_size());
+			//ESP_LOGW(TAG," Heap: %d", esp_get_free_heap_size());
+            ESP_LOGW(TAG, "[EVENT] Stack: %d heap: %d", uxTaskGetStackHighWaterMark(NULL), esp_get_free_heap_size());
 			xEventGroupSetBits(conn_event_group, MQTT_CONNECTED_BIT);
 
+            char * topic = malloc(64);
+
+            // subscribe to broadcast control messages intended for all the nodes
 			mqtt_manager_subscribe("/home/control/all/#");
 
-			char temp[64];
-			snprintf(temp,64,"/home/control/%s/#",base_name_with_mac);
-			mqtt_manager_subscribe(temp);
+            // subscribe to project-specific message
+            snprintf(topic,64,"/home/control/%s/#",base_name);
+            mqtt_manager_subscribe(topic);
+
+            // subscribe to messages directed to our node (either custom name or base_name_with_mac)
+			snprintf(topic,64,"/home/control/%s/#",base_name_with_mac);
+			mqtt_manager_subscribe(topic);
 			if (mqtt_name != base_name_with_mac) {
-				snprintf(temp,64,"/home/control/%s/#",mqtt_name);
-				mqtt_manager_subscribe(temp);
+				snprintf(topic,64,"/home/control/%s/#",mqtt_name);
+				mqtt_manager_subscribe(topic);
 			}
+            free(topic);
 
 			mqtt_publish_ext("node", "announce", "awoke", true);
 			mqtt_publish_ext("node", "framework_version", NODE_FRAMEWORK_BUILD_VERSION, true);
@@ -456,18 +476,22 @@ void wifi_disconnected_cb( void * param ) {
 
 void iot_factory_reset() {
     ESP_LOGW(TAG,"----FACTORY RESET!----");
-    // disconnect from WiFi station, reset any saved WiFi settings and restart of the Access Point
-    wifi_manager_send_message(WM_ORDER_DISCONNECT_STA, NULL);
-    wifi_manager_erase_config();
-    wifi_manager_send_message(WM_ORDER_START_AP, NULL);
 
-    // reset MQTT config. If connected to MQTT server, it is automatically disconnected when WiFi disconnects
-    mqtt_manager_set_uri("");
-    mqtt_manager_set_username("");
-    mqtt_manager_set_password("");
-    mqtt_manager_save_config();
-
+    // First let the node handle upcoming the factory reset
     if(cb_ptr_arr[ IOT_HANDLE_FACTORY_RESET ]) (*cb_ptr_arr[ IOT_HANDLE_FACTORY_RESET ])(NULL);
+
+    // Let all possible MQTT messages go through
+    vTaskDelay(1000 / portTICK_RATE_MS);
+
+    // Graceful disconnect from the AP
+    wifi_manager_send_message(WM_ORDER_DISCONNECT_STA, NULL);
+
+    // Erase the NVS
+    ESP_ERROR_CHECK(nvs_flash_erase());
+
+    // Reboot so that all variables are reset to their default values. Also AP will restart
+    vTaskDelay(1000 / portTICK_RATE_MS);
+    esp_restart();
 }
 
 
@@ -478,7 +502,7 @@ bool iot_is_connected() {
 }
 
 
-void iot_init(const char * base_name) {
+void iot_init(const char * _base_name) {
 
     // initialize task watchdog
 #ifdef ESP32
@@ -518,6 +542,7 @@ void iot_init(const char * base_name) {
 
     iot_led_init();
 
+    strncpy(base_name, _base_name, MAX_NODE_NAME_LEN );
     base_name_with_mac[0] = 0;
     node_name[0] = 0;
 
@@ -544,11 +569,18 @@ void iot_init(const char * base_name) {
 
     // Append default node name with last 6 bytes from MAC address
     struct wifi_settings_t * settings = wifi_manager_get_wifi_settings();
-    strncpy(base_name_with_mac, (char*)settings->ap_ssid, MAX_NODE_NAME_LEN );
     if (strcmp(node_name,"") != 0) {
+        uint8_t mac[6];
+        ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_STA, mac));
+        sprintf(base_name_with_mac, "%s-%2x%2x%2x", 
+            base_name,
+            mac[3],
+            mac[4],
+            mac[5]);
         ESP_LOGI(TAG, "Publishing as %s (responding also to %s)", node_name, base_name_with_mac);
         mqtt_name = node_name;
     } else {
+        strncpy(base_name_with_mac, (char*)settings->ap_ssid, MAX_NODE_NAME_LEN );
         ESP_LOGI(TAG, "Publishing as %s",base_name_with_mac);
         mqtt_name = base_name_with_mac;
     }

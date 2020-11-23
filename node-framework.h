@@ -46,6 +46,7 @@ void mqtt_publish_ext( const char * device_type, const char * subtopic, const ch
 void mqtt_publish_int( const char * device_type, const char * subtopic, int data);
 void mqtt_publish_int_ext( const char * device_type, const char * subtopic, int data, bool retain);
 void mqtt_publish_on_off( const char * device_type, const char * subtopic, int data);
+void mqtt_publish_float( const char * device_type, const char * subtopic, float data);
 
 
 /*
@@ -84,6 +85,13 @@ typedef enum iot_conn_status_t {
     IOT_MQTT_CONNECTED = 4,
     IOT_MQTT_DISCONNECTED = 5,
 } iot_conn_status_t;
+
+typedef enum iot_set_variable_return_code_t {
+    IOT_VARIABLE_NOT_FOUND = 0,
+    IOT_INVALID_VALUE,
+    IOT_SAVE_VARIABLE,
+    IOT_OK
+} iot_set_variable_return_code_t;
 
 /**
  * Each of these codes can trigger a callback function and each callback function is stored
