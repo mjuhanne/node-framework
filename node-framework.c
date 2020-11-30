@@ -519,6 +519,7 @@ void iot_init(const char * _base_name) {
     conn_event_group = xEventGroupCreate();
 
     ESP_LOGI(TAG,"Running on core #%d", xPortGetCoreID());
+    ESP_LOGI(TAG,"Using project/base name '%s'", _base_name);
 
     // Init and open NVS partition in RW mode
     esp_err_t ret = nvs_flash_init();
@@ -572,7 +573,7 @@ void iot_init(const char * _base_name) {
     if (strcmp(node_name,"") != 0) {
         uint8_t mac[6];
         ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_STA, mac));
-        sprintf(base_name_with_mac, "%s-%2x%2x%2x", 
+        sprintf(base_name_with_mac,"%s-%02x%02x%02x", 
             base_name,
             mac[3],
             mac[4],
