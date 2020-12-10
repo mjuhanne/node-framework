@@ -97,23 +97,28 @@ void mqtt_publish_float( const char * device_type, const char * subtopic, float 
 }
 
 void mqtt_publish_ha_cfg( const char * device_type, const char * subtopic, const char * cfg_template, int name_count) {
-	size_t len = strlen(cfg_template) + name_count*strlen(mqtt_get_name()) + 1;
-	char * tmp = malloc(len);
-	if (tmp) {
-	    if (name_count == 1) {
-	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
-        } else if (name_count == 2) {
-	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
-        } else if (name_count == 3) {
-	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
-        } else if (name_count == 4) {
-	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
-        } else if (name_count == 5) {
-            snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
-        }
-	    mqtt_publish_ext(device_type, subtopic, tmp, true);
-	    free(tmp);
-	}
+    if (cfg_template != NULL) {
+    	size_t len = strlen(cfg_template) + name_count*strlen(mqtt_get_name()) + 1;
+    	char * tmp = malloc(len);
+    	if (tmp) {
+    	    if (name_count == 1) {
+    	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
+            } else if (name_count == 2) {
+    	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name() );
+            } else if (name_count == 3) {
+    	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
+            } else if (name_count == 4) {
+    	        snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
+            } else if (name_count == 5) {
+                snprintf(tmp, len, cfg_template, mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name(), mqtt_get_name() );
+            }
+    	    mqtt_publish_ext(device_type, subtopic, tmp, true);
+    	    free(tmp);
+    	}
+    } else {
+        // Send out empty configuration message to Home assistant in order to remove associations to old node name
+        mqtt_publish_ext(device_type, subtopic, "", false);
+    }
 }
 
 const char * mqtt_get_name() {
@@ -189,14 +194,15 @@ void mqtt_update_node_name(const char * name) {
     ESP_LOGI(TAG,"-- Subscribe %s", topic);
     free(topic);
 
-    //char oldname[MAX_NODE_NAME_LEN];
-    //strncpy(oldname, node_name,MAX_NODE_NAME_LEN);
+    /* callback */
+    if(cb_ptr_arr[ IOT_HANDLE_PRE_NAME_CHANGE ]) (*cb_ptr_arr[ IOT_HANDLE_PRE_NAME_CHANGE ])(NULL);
+
     strncpy(node_name, name, MAX_NODE_NAME_LEN);
+    mqtt_name = node_name;
 
     /* callback */
     if(cb_ptr_arr[ IOT_HANDLE_NAME_CHANGE ]) (*cb_ptr_arr[ IOT_HANDLE_NAME_CHANGE ])( node_name );
 
-    mqtt_name = node_name;
 }
 
 
@@ -221,6 +227,7 @@ void mqtt_set(const char * variable, const char * data) {
             return;         
         }
         mqtt_update_node_name(data);
+        ret = IOT_SAVE_VARIABLE;
     } else {
         /* callback: let the node handle setting this variable. Return value IOT_SAVE_VARIABLE means that we want to save the variable to NVS. */
         if(cb_ptr_arr[ IOT_HANDLE_SET_VARIABLE ]) {

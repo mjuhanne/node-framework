@@ -105,11 +105,12 @@ typedef enum iot_callback_code_t {
     IOT_HANDLE_MQTT_MSG = 1,
     IOT_HANDLE_SET_VARIABLE = 2,
     IOT_HANDLE_NAME_CHANGE = 3,
-    IOT_HANDLE_OTA = 4,
-    IOT_HANDLE_ERROR = 5,
-    IOT_HANDLE_CONN_STATUS = 6,
-    IOT_HANDLE_FACTORY_RESET = 7,
-    IOT_CB_CODE_COUNT = 8 /* important for the callback array */
+    IOT_HANDLE_PRE_NAME_CHANGE = 4,
+    IOT_HANDLE_OTA = 5,
+    IOT_HANDLE_ERROR = 6,
+    IOT_HANDLE_CONN_STATUS = 7,
+    IOT_HANDLE_FACTORY_RESET = 8,
+    IOT_CB_CODE_COUNT = 9 /* important for the callback array */
 } iot_cb_code_t;
 
 void iot_set_callback(iot_cb_code_t callback_code, int (*func_ptr)(void*) );
