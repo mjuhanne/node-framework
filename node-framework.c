@@ -8,7 +8,6 @@
 #include "esp_wifi.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
-#include "esp32/rom/rtc.h"
 
 #include "node-framework.h"
 #include "mqtt_client.h"
@@ -22,6 +21,9 @@
 #define ESP32
 #endif
 
+#ifdef ESP32
+#include "esp32/rom/rtc.h"
+#endif
 
 #define TWDT_TIMEOUT_S  10
 
@@ -44,6 +46,50 @@ static char base_name[MAX_NODE_NAME_LEN];
 static char base_name_with_mac[MAX_NODE_NAME_LEN+7];
 static char node_name[MAX_NODE_NAME_LEN];
 static char * mqtt_name;    // pointer to default MQTT node name (either base_name_with_mac or node_name)
+
+#ifdef ESP32
+
+#define MAX_RESET_REASONS 17
+
+const char * reset_reasons[MAX_RESET_REASONS] = { 
+    "", // 0 empty
+    "POWERON_RESET",    /**<1, Vbat power on reset*/
+    "", // 2 empty
+    "SW_RESET",       /**<3, Software reset digital core*/
+    "OWDT_RESET",   /**<4, Legacy watch dog reset digital core*/
+    "DEEPSLEEP_RESET",  /**<5, Deep Sleep reset digital core*/
+    "SDIO_RESET",   /**<6, Reset by SLC module, reset digital core*/
+    "TG0WDT_SYS_RESET",  /**<7, Timer Group0 Watch dog reset digital core*/
+    "TG1WDT_SYS_RESET", /**<8, Timer Group1 Watch dog reset digital core*/
+    "RTCWDT_SYS_RESET", /**<9, RTC Watch dog Reset digital core*/
+    "INTRUSION_RESET",  /**<10, Instrusion tested to reset CPU*/
+    "TGWDT_CPU_RESET",  /**<11, Time Group reset CPU*/
+    "SW_CPU_RESET",  /**<12, Software reset CPU*/
+    "RTCWDT_CPU_RESET",    /**<13, RTC Watch dog Reset CPU*/
+    "EXT_CPU_RESET",   /**<14, for APP CPU, reseted by PRO CPU*/
+    "RTCWDT_BROWN_OUT_RESET", /**<15, Reset when the vdd voltage is not stable*/
+    "RTCWDT_RTC_RESET"  /**<16, RTC Watch dog reset digital core and rtc module*/
+};
+
+#else
+
+#define MAX_RESET_REASONS 12
+
+const char * reset_reasons[MAX_RESET_REASONS] = { 
+    "Unknown",    //!< Reset reason can not be determined
+    "Power on",        //!< Reset due to power-on event
+    "Ext reset",            //!< Reset by external pin (not applicable for ESP8266)
+    "Software reset",             //!< Software reset via esp_restart
+    "Exception/panic",          //!< Software reset due to exception/panic
+    "Int watchdog",        //!< Reset (software or hardware) due to interrupt watchdog
+    "Task watchdog",       //!< Reset due to task watchdog
+    "Other watchdog",            //!< Reset due to other watchdogs
+    "Deepsleep",      //!< Reset after exiting deep sleep mode
+    "Brownout",       //!< Brownout reset (software or hardware)
+    "SDIO reset",           //!< Reset over SDIO
+    "Fast reboot"        //!< Fast reboot
+};
+#endif
 
 void mqtt_publish_error(const char * text) {
     char topic[64];
@@ -373,29 +419,12 @@ void mqtt_handle_data(esp_mqtt_event_handle_t event)
     }
 }
 
-#define MAX_RESET_REASONS 17
-const char * reset_reasons[MAX_RESET_REASONS] = { 
-    "", // 0 empty
-    "POWERON_RESET",    /**<1, Vbat power on reset*/
-    "", // 2 empty
-    "SW_RESET",       /**<3, Software reset digital core*/
-    "OWDT_RESET",   /**<4, Legacy watch dog reset digital core*/
-    "DEEPSLEEP_RESET",  /**<5, Deep Sleep reset digital core*/
-    "SDIO_RESET",   /**<6, Reset by SLC module, reset digital core*/
-    "TG0WDT_SYS_RESET",  /**<7, Timer Group0 Watch dog reset digital core*/
-    "TG1WDT_SYS_RESET", /**<8, Timer Group1 Watch dog reset digital core*/
-    "RTCWDT_SYS_RESET", /**<9, RTC Watch dog Reset digital core*/
-    "INTRUSION_RESET",  /**<10, Instrusion tested to reset CPU*/
-    "TGWDT_CPU_RESET",  /**<11, Time Group reset CPU*/
-    "SW_CPU_RESET",  /**<12, Software reset CPU*/
-    "RTCWDT_CPU_RESET",    /**<13, RTC Watch dog Reset CPU*/
-    "EXT_CPU_RESET",   /**<14, for APP CPU, reseted by PRO CPU*/
-    "RTCWDT_BROWN_OUT_RESET", /**<15, Reset when the vdd voltage is not stable*/
-    "RTCWDT_RTC_RESET"  /**<16, RTC Watch dog reset digital core and rtc module*/
-};
-
 const char * get_reset_reason() {
+#ifdef ESP32
     int reason = rtc_get_reset_reason(0);
+#else
+    int reason = esp_reset_reason();
+#endif
     if (( reason >0) && (reason < MAX_RESET_REASONS) )
         return reset_reasons[reason];
     return "ERR_NOT_FOUND";
