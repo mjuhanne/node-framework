@@ -32,6 +32,10 @@ bool iot_get_nvs_bool(const char * variable, bool * value);
 bool iot_get_nvs_uint32(const char * variable, uint32_t * value);
 bool iot_get_nvs_float(const char * variable, float * value);
 
+// Returns value as string, NULL otherwise. String must be free'd by the caller!
+char * iot_get_nvs_str(const char * variable);
+
+
 bool iot_is_connected();
 
 void iot_factory_reset();
@@ -102,15 +106,16 @@ typedef enum iot_set_variable_return_code_t {
  */
 typedef enum iot_callback_code_t {
     IOT_NONE = 0,
-    IOT_HANDLE_MQTT_MSG = 1,
-    IOT_HANDLE_SET_VARIABLE = 2,
-    IOT_HANDLE_NAME_CHANGE = 3,
-    IOT_HANDLE_PRE_NAME_CHANGE = 4,
-    IOT_HANDLE_OTA = 5,
-    IOT_HANDLE_ERROR = 6,
-    IOT_HANDLE_CONN_STATUS = 7,
-    IOT_HANDLE_FACTORY_RESET = 8,
-    IOT_CB_CODE_COUNT = 9 /* important for the callback array */
+    IOT_HANDLE_MQTT_MSG = 1,            // Handle MQTT message where device_type, node_name, subtopic and possible argument is already parsed
+    IOT_HANDLE_GENERIC_MQTT_MSG = 2,    // Handle raw MQTT topic before any node-framework component (device_type, node_name etc) parsing. 
+    IOT_HANDLE_SET_VARIABLE = 3,
+    IOT_HANDLE_NAME_CHANGE = 4,
+    IOT_HANDLE_PRE_NAME_CHANGE = 5,
+    IOT_HANDLE_OTA = 6,
+    IOT_HANDLE_ERROR = 7,
+    IOT_HANDLE_CONN_STATUS = 8,
+    IOT_HANDLE_FACTORY_RESET = 9,
+    IOT_CB_CODE_COUNT = 10 /* important for the callback array */
 } iot_cb_code_t;
 
 void iot_set_callback(iot_cb_code_t callback_code, int (*func_ptr)(void*) );

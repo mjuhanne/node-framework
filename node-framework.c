@@ -8,7 +8,7 @@
 #include "esp_wifi.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
-
+#include "esp32/rom/rtc.h"
 
 #include "node-framework.h"
 #include "mqtt_client.h"
@@ -242,8 +242,9 @@ void mqtt_set(const char * variable, const char * data) {
         ESP_LOGE(TAG,"SET: Unknown variable!");
         mqtt_publish_error("Unknown variable");
     } else if (ret == IOT_SAVE_VARIABLE) {
-        if (nvs_set_str(storage_handle, variable, data) != ESP_OK) {
-            ESP_LOGE(TAG,"SET: error recording variable to NVS!");
+        ret = nvs_set_str(storage_handle, variable, data);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG,"SET: error recording variable to NVS (err '%s')!", esp_err_to_name(ret));
             mqtt_publish_error("error recording variable to NVS!");
         } else {
             ESP_LOGI(TAG,"Value written to NVS");
@@ -337,6 +338,15 @@ void mqtt_handle_data(esp_mqtt_event_handle_t event)
     memcpy(data, event->data, n);
     data[n]=0;
 
+    // If node implementation wants to handle all raw mqtt messages, so be it
+    if(cb_ptr_arr[ IOT_HANDLE_GENERIC_MQTT_MSG ]) {
+        iot_mqtt_msg_t msg;
+        msg.arg = temp;
+        msg.data = data;
+        if(cb_ptr_arr[ IOT_HANDLE_GENERIC_MQTT_MSG ]) (*cb_ptr_arr[ IOT_HANDLE_GENERIC_MQTT_MSG ])( &msg );        
+    }
+    // .. but let's process them also with our architecture anyway:
+
     char* rest = temp;
     // ignore 'home'
     char * token = strtok_r(temp,"/",&rest);
@@ -363,6 +373,33 @@ void mqtt_handle_data(esp_mqtt_event_handle_t event)
     }
 }
 
+#define MAX_RESET_REASONS 17
+const char * reset_reasons[MAX_RESET_REASONS] = { 
+    "", // 0 empty
+    "POWERON_RESET",    /**<1, Vbat power on reset*/
+    "", // 2 empty
+    "SW_RESET",       /**<3, Software reset digital core*/
+    "OWDT_RESET",   /**<4, Legacy watch dog reset digital core*/
+    "DEEPSLEEP_RESET",  /**<5, Deep Sleep reset digital core*/
+    "SDIO_RESET",   /**<6, Reset by SLC module, reset digital core*/
+    "TG0WDT_SYS_RESET",  /**<7, Timer Group0 Watch dog reset digital core*/
+    "TG1WDT_SYS_RESET", /**<8, Timer Group1 Watch dog reset digital core*/
+    "RTCWDT_SYS_RESET", /**<9, RTC Watch dog Reset digital core*/
+    "INTRUSION_RESET",  /**<10, Instrusion tested to reset CPU*/
+    "TGWDT_CPU_RESET",  /**<11, Time Group reset CPU*/
+    "SW_CPU_RESET",  /**<12, Software reset CPU*/
+    "RTCWDT_CPU_RESET",    /**<13, RTC Watch dog Reset CPU*/
+    "EXT_CPU_RESET",   /**<14, for APP CPU, reseted by PRO CPU*/
+    "RTCWDT_BROWN_OUT_RESET", /**<15, Reset when the vdd voltage is not stable*/
+    "RTCWDT_RTC_RESET"  /**<16, RTC Watch dog reset digital core and rtc module*/
+};
+
+const char * get_reset_reason() {
+    int reason = rtc_get_reset_reason(0);
+    if (( reason >0) && (reason < MAX_RESET_REASONS) )
+        return reset_reasons[reason];
+    return "ERR_NOT_FOUND";
+}
 
 void mqtt_event_handler_cb(void * arg)
 {
@@ -395,6 +432,7 @@ void mqtt_event_handler_cb(void * arg)
 
 			mqtt_publish_ext("node", "announce", "awoke", true);
 			mqtt_publish_ext("node", "framework_version", NODE_FRAMEWORK_BUILD_VERSION, true);
+			mqtt_publish_ext("node", "lastResetReason", get_reset_reason(), true);
 
             if(cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ]) (*cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ])( (void*)IOT_MQTT_CONNECTED );
 			break;
@@ -422,6 +460,25 @@ void mqtt_event_handler_cb(void * arg)
 
 void mqtt_connecting_cb(void * arg) {
     if(cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ]) (*cb_ptr_arr[ IOT_HANDLE_CONN_STATUS ])( (void*)IOT_MQTT_CONNECTING );
+}
+
+
+// Returns value as string, NULL otherwise. String must be free'd by the caller!
+char * iot_get_nvs_str(const char * variable) {
+    size_t string_size;
+    // get string size
+    if (nvs_get_str(storage_handle, variable, NULL, &string_size)!=ESP_OK) {
+        return NULL;
+    }
+    char * str = malloc(string_size);   // size includes already the zero terminator
+    if (str==NULL) {
+        return NULL;
+    }
+    if (nvs_get_str(storage_handle, variable, str, &string_size)!=ESP_OK) {
+        free(str);
+        return NULL;
+    }
+    return str;
 }
 
 
@@ -604,6 +661,7 @@ void iot_logging(void) {
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
 
     esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("wifi", ESP_LOG_VERBOSE);
     esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
     esp_log_level_set("MQTT_CLIENT", ESP_LOG_VERBOSE);
 

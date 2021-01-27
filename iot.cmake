@@ -3,6 +3,7 @@
 # export IOT_FIRMWARE_SERVER_WWW_ROOT_URI=web-user@firmware-server.local:/var/www
 # export IOT_FIRMWARE_SERVER_URI=http://firmware-server.local:80
 #
+# Please clean and rebuild the project after changing the variables (Ninja will not detect changes and build.ninja contains stale values)
 # These OTA commands use the preconfigured command line HiveMQ MQTT client (https://www.hivemq.com/blog/mqtt-cli/) but feel free to modify the
 # commands to suit your favourite MQTT tool (mosquitto_pub for example)
 
